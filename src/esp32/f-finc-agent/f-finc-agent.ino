@@ -19,7 +19,7 @@
 #include <ESPAsyncWebServer.h>
 
 // --- CẤU HÌNH FIRMWARE OTA TỰ ĐỘNG ---
-#define FIRMWARE_VERSION 1.2f
+#define FIRMWARE_VERSION 1.3f
 const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/firmware/manifest.json"; 
 
 // --- CẤU HÌNH GPIO ---
