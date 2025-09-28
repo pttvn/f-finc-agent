@@ -1,40 +1,28 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
-#include <Update.h>
 #include <vector>
-
-// THƯ VIỆN BỔ SUNG
 #include <HTTPClient.h> 
 #include <PubSubClient.h> 
 #include <WiFiClient.h> 
 #include <HTTPUpdate.h>
 #include <Update.h>
 
-// THÊM THƯ VIỆN WATCHDOG
-#include "esp_task_wdt.h"
-
 // FIX CONFLICT
 #define HTTP_METHOD_DEF 
 #include <ESPAsyncWebServer.h>
 
-// --- CẤU HÌNH FIRMWARE OTA TỰ ĐỘNG ---
-#define FIRMWARE_VERSION 1.3f
-const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/firmware/manifest.json"; 
+// FIRMWARE
+#define FIRMWARE_VERSION 1.4f
 
-// --- CẤU HÌNH GPIO ---
+// GPIO
 const int INPUT_PINS[] = {32, 33, 34, 35, 36, 39, 14, 13};
 const int NUM_INPUTS = 8;
 const int OUTPUT_PINS[] = {26, 25, 27, 18, 19, 23, 4, 2};
 const int NUM_OUTPUTS = 8;
 bool outputStates[NUM_OUTPUTS] = {false, false, false, false, false, false, false, false};
 
-// --- CÁC ĐỐI TƯỢNG TOÀN CỤC CHO MẠNG ---
-WiFiClient espClient;
-PubSubClient mqttClient(espClient);
-const char* mqtt_client_id = "ESP32_F_FINC_Agent_01";
-
-// --- CÁC CẤU TRÚC VÀ BIẾN TOÀN CỤC ---
+// 
 struct Device {
   String id;
   bool connected;
@@ -68,105 +56,10 @@ struct ApiConfig {
   bool enabled;
 } apiConfig = {"http://your-api.com/data", "apiuser", "apipass", false};
 
-int firmwareInterval = 12;
-unsigned long lastFirmwareCheck = 0;
-
 unsigned long lastDataSend = 0;
 const unsigned long DATA_SEND_INTERVAL = 5000;
 
-extern const char index_html[] PROGMEM; 
-AsyncWebServer server(80);
-
-// --- HÀM CẬP NHẬT FIRMWARE TỰ ĐỘNG ---
-void checkFirmwareUpdate() {
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("OTA: WiFi not connected, skipping update check.");
-        return;
-    }
-
-    Serial.println("OTA: Checking for firmware updates...");
-    Serial.print("OTA: Manifest URL: ");
-    Serial.println(firmware_manifest_url);
-
-    HTTPClient http;
-    
-    // 1. Tải Manifest (JSON)
-    http.begin(firmware_manifest_url); 
-    int httpCode = http.GET();
-    
-    if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        DynamicJsonDocument doc(256);
-        DeserializationError error = deserializeJson(doc, payload);
-
-        if (error) {
-            Serial.print("OTA: Failed to parse manifest JSON: ");
-            Serial.println(error.c_str());
-        } else {
-            float newVersion = doc["version"];
-            const char* binaryUrl = doc["url"]; 
-
-            Serial.print("OTA: Current version: ");
-            Serial.println(FIRMWARE_VERSION, 2);
-            Serial.print("OTA: Available version from server: ");
-            Serial.println(newVersion, 2);
-            Serial.print("OTA: Binary URL: ");
-            Serial.println(binaryUrl);
-
-            if (newVersion > FIRMWARE_VERSION) {
-                Serial.println("OTA: New firmware available. Starting update process...");
-
-                http.begin(binaryUrl);
-                int httpCode = http.GET();
-                if (httpCode == HTTP_CODE_OK) {
-                  int contentLength = http.getSize();
-                  if (contentLength > 0) {
-                    bool canUpdate = Update.begin(contentLength);
-                    if (canUpdate) {
-                      WiFiClient &stream = http.getStream();
-                      Update.writeStream(stream);
-                      if (Update.end()) {
-                        Serial.println("OTA update successful!");
-                        ESP.restart();
-                      } else {
-                        Serial.printf("OTA update failed: %s\n", Update.errorString());
-                      }
-                    } else {
-                      Serial.println("Not enough space to begin OTA update.");
-                    }
-                  } else {
-                    Serial.println("No content length in HTTP response.");
-                  }
-                } else {
-                  Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-                }
-                
-                /* WiFiClient client;
-                t_httpUpdate_return ret = httpUpdate.update(client, binaryUrl);
-
-                switch (ret) {
-                    case HTTP_UPDATE_FAILED:
-                        Serial.printf("OTA Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-                        break;
-                    case HTTP_UPDATE_NO_UPDATES:
-                        Serial.println("OTA: No updates needed.");
-                        break;
-                    case HTTP_UPDATE_OK:
-                        Serial.println("OTA: Update successful!");
-                        break;
-                } */
-            } else {
-                Serial.println("OTA: Firmware is already up to date.");
-            }
-        }
-    } else {
-        Serial.printf("OTA: Failed to download manifest, HTTP error (%d): %s\n", httpCode, http.errorToString(httpCode).c_str());
-    }
-    
-    http.end(); // Kết thúc kết nối HTTP
-}
-
-/** Global functions */
+// Global functions
 String readAndSerializeData() {
     DynamicJsonDocument doc(512);
     JsonObject inputs = doc.createNestedObject("inputs");
@@ -198,6 +91,102 @@ void handleJsonBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
         }
         handler(request, doc);
     }
+}
+
+// FIRMWARE
+const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/firmware/manifest.json";
+int firmwareInterval = 12;
+unsigned long lastFirmwareCheck = 0;
+
+void checkFirmwareUpdate() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("*ota:WiFi not connected! Skipping update check");
+    return;
+  }
+
+  // Tải Manifest
+  Serial.println("*ota:Checking for firmware updates...");
+  
+  HTTPClient http;
+  http.begin(firmware_manifest_url); 
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf("*ota:Failed to download manifest, HTTP error (%d): %s\n", httpCode, http.errorToString(httpCode).c_str());
+    http.end();
+    return;
+  }
+
+  // Check version
+  String payload = http.getString();
+  DynamicJsonDocument doc(256);
+
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print("*ota:Failed to parse manifest JSON: ");
+    Serial.println(error.c_str());
+    http.end();
+    return;
+  }
+
+  float newVersion = doc["version"];
+  const char* binaryUrl = doc["url"]; 
+
+  if (newVersion <= FIRMWARE_VERSION) {
+    Serial.print("*ota:Current version: ");
+    Serial.println(FIRMWARE_VERSION, 2);
+    Serial.print("*ota:Available version: ");
+    Serial.println(newVersion, 2);
+    Serial.println("*ota:Firmware is already up to date.");
+
+    http.end();
+    return;
+  }
+
+  // Starting update
+  Serial.println("*ota:New firmware available. Starting update process...");
+  Serial.print("*ota:Binary url ");
+  Serial.println(binaryUrl);
+
+  http.begin(binaryUrl);
+  httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    int contentLength = http.getSize();
+    if (contentLength > 0) {
+      bool canUpdate = Update.begin(contentLength);
+      if (canUpdate) {
+        WiFiClient &stream = http.getStream();
+        Update.writeStream(stream);
+        if (Update.end()) {
+          Serial.println("*ota:Update successful! Restarting...");
+          ESP.restart();
+        } else {
+          Serial.printf("*ota:Update failed: %s\n", Update.errorString());
+        }
+      } else {
+        Serial.println("*ota:Not enough space to begin OTA update.");
+      }
+    } else {
+      Serial.println("*ota:No content length in HTTP response.");
+    }
+  } else {
+    Serial.printf("*ota:HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  /* WiFiClient client;
+  t_httpUpdate_return ret = httpUpdate.update(client, binaryUrl);
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("OTA Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("OTA: No updates needed.");
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("OTA: Update successful!");
+      break;
+  } */
+
+  http.end();
 }
 
 // Login
@@ -237,6 +226,10 @@ void handleAlarmConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc)
 }
 
 // MQTT
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+const char* mqtt_client_id = "ESP32_F_FINC_Agent_01";
+
 void reconnectMqtt() {
   if (!mqttConfig.enabled) return;
   Serial.println("MQTT: Reconnect routine started.");
@@ -324,55 +317,55 @@ void sendApiData(const String& payload) {
     }
 }
 
-// --- SETUP ---
+//
+extern const char index_html[] PROGMEM; 
+AsyncWebServer server(80);
+
+// SETUP
 void setup() {
   Serial.begin(115200);
 
-  /** Inputs & Outputs */
+  // Inputs & Outputs
   for (int i = 0; i < NUM_INPUTS; i++) {
     int pin = INPUT_PINS[i];
     
     // Kiểm tra chân GPIO: Các chân >= 34 (34, 35, 36, 39) là Input-Only và KHÔNG hỗ trợ PULLUP.
-    // Việc cố gắng cấu hình PULLUP cho các chân này thường gây ra lỗi GPIO 78/79.
     if (pin >= 34) {
-        pinMode(pin, INPUT); // Chỉ đặt là INPUT để đọc giá trị
+      pinMode(pin, INPUT); // Chỉ đặt là INPUT để đọc giá trị
     } else {
-        pinMode(pin, INPUT_PULLUP); // Đặt INPUT_PULLUP cho các chân hỗ trợ (32, 33, 14, 13)
+      pinMode(pin, INPUT_PULLUP); // Đặt INPUT_PULLUP cho các chân hỗ trợ (32, 33, 14, 13)
     }
   }
   for (int i = 0; i < NUM_OUTPUTS; i++) {
-      pinMode(OUTPUT_PINS[i], OUTPUT);
-      digitalWrite(OUTPUT_PINS[i], LOW);
+    pinMode(OUTPUT_PINS[i], OUTPUT);
+    digitalWrite(OUTPUT_PINS[i], LOW);
   }
 
-  /** Wifi manager */
+  // Wifi manager
   WiFiManager wm;
   if (!wm.autoConnect("F-FINC_ESP32_SETUP", "12345678")) {
     delay(3000);
     ESP.restart();
   }
 
-  /** MQTT Services */
+  // MQTT Services
   if (mqttConfig.enabled) {
-      mqttClient.setServer(mqttConfig.url.c_str(), mqttConfig.port);
-      reconnectMqtt();
+    mqttClient.setServer(mqttConfig.url.c_str(), mqttConfig.port);
+    reconnectMqtt();
   }
 
-  /** Web services */
+  // Web services
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", index_html);
   });
-  
   server.on("/auth/login", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleLogin);
   });
-  
   server.on("/control/output", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleOutputControl);
   });
-  
   server.on("/io-status", HTTP_GET, [](AsyncWebServerRequest *request) {
     String dataPayload = readAndSerializeData(); 
     DynamicJsonDocument doc(1024);
@@ -401,7 +394,6 @@ void setup() {
     serializeJson(newDoc, finalOutput);
     request->send(200, "application/json", finalOutput);
   });
-  
   server.on("/system-info", HTTP_GET, [](AsyncWebServerRequest *request) {
     DynamicJsonDocument doc(512);
     doc["firmware_version"] = FIRMWARE_VERSION; // <-- THÊM DÒNG NÀY
@@ -416,64 +408,56 @@ void setup() {
     serializeJson(doc, output);
     request->send(200, "application/json", output);
   });
-  
   server.on("/config/mqtt", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleMqttConfig);
   });
-  
   server.on("/config/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleApiConfig);
   });
-  
   server.on("/config/network", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleNetworkConfig);
   });
-  
   server.on("/config/alarm", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleAlarmConfig);
   });
-  
   server.on("/api/post", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handlePostApiData);
   });
-  
-  // THAY ĐỔI: Endpoint này chỉ để lưu interval
-  server.on("/firmware/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, 
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-        if (index + len == total) {
-            String body;
-            for(size_t i=0; i<len; i++) body += (char)data[i];
-            DynamicJsonDocument doc(128);
-            if (!deserializeJson(doc, body)) {
-                firmwareInterval = doc["interval"];
-                request->send(200, "application/json", "{\"success\":true}");
-            } else {
-                request->send(400, "application/json", "{\"success\":false}");
-            }
-        }
-    });
 
-  // THÊM MỚI: Endpoint để kích hoạt kiểm tra thủ công
+  // FIRMWARE
+  server.on("/firmware/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (index + len == total) {
+      String body;
+      for(size_t i=0; i<len; i++) body += (char)data[i];
+      DynamicJsonDocument doc(128);
+      if (!deserializeJson(doc, body)) {
+        firmwareInterval = doc["interval"];
+        request->send(200, "application/json", "{\"success\":true}");
+      } else {
+        request->send(400, "application/json", "{\"success\":false}");
+      }
+    }
+  });
   server.on("/firmware/check-now", HTTP_GET, [](AsyncWebServerRequest *request) {
-      xTaskCreate(
-          [](void* pvParameters) {
-              checkFirmwareUpdate();
-              vTaskDelete(NULL);
-          },
-          "otaCheckTask", 4096, NULL, 1, NULL
-      );
-      request->send(200, "application/json", "{\"success\":true, \"message\":\"Đã bắt đầu kiểm tra cập nhật.\"}");
+    xTaskCreate([](void* pvParameters) {
+        checkFirmwareUpdate();
+        vTaskDelete(NULL);
+      },
+      "otaCheckTask", 4096, NULL, 1, NULL
+    );
+    request->send(200, "application/json", "{\"success\":true, \"message\":\"Đã bắt đầu kiểm tra cập nhật.\"}");
   });
 
+  // START
   server.begin();
 }
 
-// --- LOOP ---
+// LOOP
 void loop() {
   if (mqttConfig.enabled) {
     if (!mqttClient.connected()) {
@@ -481,16 +465,18 @@ void loop() {
     }
     mqttClient.loop();
   }
-  
+
+  // Logging data
+  if (millis() - lastDataSend >= DATA_SEND_INTERVAL) {
+    String payload = readAndSerializeData();
+    sendMqttData(payload);
+    sendApiData(payload);
+    lastDataSend = millis();
+  }
+    
+  // Checking firmware
   if (firmwareInterval > 0 && (millis() - lastFirmwareCheck >= (unsigned long)firmwareInterval * 3600000)) {
     checkFirmwareUpdate();
     lastFirmwareCheck = millis();
-  }
-  
-  if (millis() - lastDataSend >= DATA_SEND_INTERVAL) {
-      String payload = readAndSerializeData();
-      sendMqttData(payload);
-      sendApiData(payload);
-      lastDataSend = millis();
   }
 }
