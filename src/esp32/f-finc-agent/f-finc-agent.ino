@@ -16,8 +16,8 @@
 #include <ESPAsyncWebServer.h>
 
 // --- CẤU HÌNH FIRMWARE OTA TỰ ĐỘNG ---
-#define FIRMWARE_VERSION 1.0f // <-- PHIÊN BẢN FIRMWARE HIỆN TẠI
-const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/src/esp32/manifest.json"; 
+#define FIRMWARE_VERSION 1.0f
+const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/firmware/manifest.json"; 
 
 // --- CẤU HÌNH GPIO ---
 const int INPUT_PINS[] = {32, 33, 34, 35, 36, 39, 14, 13};
