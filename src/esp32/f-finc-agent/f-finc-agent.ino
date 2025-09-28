@@ -11,12 +11,15 @@
 #include <HTTPUpdate.h>
 #include <Update.h>
 
+// THÊM THƯ VIỆN WATCHDOG
+#include "esp_task_wdt.h"
+
 // FIX CONFLICT
 #define HTTP_METHOD_DEF 
 #include <ESPAsyncWebServer.h>
 
 // --- CẤU HÌNH FIRMWARE OTA TỰ ĐỘNG ---
-#define FIRMWARE_VERSION 1.0f
+#define FIRMWARE_VERSION 1.2f
 const char* firmware_manifest_url = "https://pttvn.github.io/f-finc-agent/firmware/manifest.json"; 
 
 // --- CẤU HÌNH GPIO ---
@@ -74,38 +77,7 @@ const unsigned long DATA_SEND_INTERVAL = 5000;
 extern const char index_html[] PROGMEM; 
 AsyncWebServer server(80);
 
-// --- HÀM CẬP NHẬT FIRMWARE TỰ ĐỘNG (ĐÃ VIẾT LẠI) ---
-void performUpdate(String firmwareUrl) {
-  WiFiClient client;
-  HTTPClient http;
-
-  http.begin(client, firmwareUrl);
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {
-    int contentLength = http.getSize();
-    if (contentLength > 0) {
-      bool canUpdate = Update.begin(contentLength);
-      if (canUpdate) {
-        WiFiClient &stream = http.getStream();
-        Update.writeStream(stream);
-        if (Update.end()) {
-          Serial.println("OTA update successful!");
-          ESP.restart();
-        } else {
-          Serial.printf("OTA update failed: %s\n", Update.errorString());
-        }
-      } else {
-        Serial.println("Not enough space to begin OTA update.");
-      }
-    } else {
-      Serial.println("No content length in HTTP response.");
-    }
-  } else {
-    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-  }
-  http.end();
-}
+// --- HÀM CẬP NHẬT FIRMWARE TỰ ĐỘNG ---
 void checkFirmwareUpdate() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("OTA: WiFi not connected, skipping update check.");
@@ -117,7 +89,6 @@ void checkFirmwareUpdate() {
     Serial.println(firmware_manifest_url);
 
     HTTPClient http;
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); 
     
     // 1. Tải Manifest (JSON)
     http.begin(firmware_manifest_url); 
@@ -133,7 +104,6 @@ void checkFirmwareUpdate() {
             Serial.println(error.c_str());
         } else {
             float newVersion = doc["version"];
-            // Đảm bảo binaryUrl là const char*
             const char* binaryUrl = doc["url"]; 
 
             Serial.print("OTA: Current version: ");
@@ -145,8 +115,33 @@ void checkFirmwareUpdate() {
 
             if (newVersion > FIRMWARE_VERSION) {
                 Serial.println("OTA: New firmware available. Starting update process...");
+
+                http.begin(binaryUrl);
+                int httpCode = http.GET();
+                if (httpCode == HTTP_CODE_OK) {
+                  int contentLength = http.getSize();
+                  if (contentLength > 0) {
+                    bool canUpdate = Update.begin(contentLength);
+                    if (canUpdate) {
+                      WiFiClient &stream = http.getStream();
+                      Update.writeStream(stream);
+                      if (Update.end()) {
+                        Serial.println("OTA update successful!");
+                        ESP.restart();
+                      } else {
+                        Serial.printf("OTA update failed: %s\n", Update.errorString());
+                      }
+                    } else {
+                      Serial.println("Not enough space to begin OTA update.");
+                    }
+                  } else {
+                    Serial.println("No content length in HTTP response.");
+                  }
+                } else {
+                  Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+                }
                 
-                WiFiClient client;
+                /* WiFiClient client;
                 t_httpUpdate_return ret = httpUpdate.update(client, binaryUrl);
 
                 switch (ret) {
@@ -157,15 +152,14 @@ void checkFirmwareUpdate() {
                         Serial.println("OTA: No updates needed.");
                         break;
                     case HTTP_UPDATE_OK:
-                        Serial.println("OTA: Update successful!"); // ESP tự khởi động lại
+                        Serial.println("OTA: Update successful!");
                         break;
-                }
+                } */
             } else {
                 Serial.println("OTA: Firmware is already up to date.");
             }
         }
     } else {
-        // Lỗi HTTP Code khác (thường là 404 nếu file không tồn tại)
         Serial.printf("OTA: Failed to download manifest, HTTP error (%d): %s\n", httpCode, http.errorToString(httpCode).c_str());
     }
     
@@ -336,7 +330,15 @@ void setup() {
 
   /** Inputs & Outputs */
   for (int i = 0; i < NUM_INPUTS; i++) {
-      pinMode(INPUT_PINS[i], INPUT_PULLUP);
+    int pin = INPUT_PINS[i];
+    
+    // Kiểm tra chân GPIO: Các chân >= 34 (34, 35, 36, 39) là Input-Only và KHÔNG hỗ trợ PULLUP.
+    // Việc cố gắng cấu hình PULLUP cho các chân này thường gây ra lỗi GPIO 78/79.
+    if (pin >= 34) {
+        pinMode(pin, INPUT); // Chỉ đặt là INPUT để đọc giá trị
+    } else {
+        pinMode(pin, INPUT_PULLUP); // Đặt INPUT_PULLUP cho các chân hỗ trợ (32, 33, 14, 13)
+    }
   }
   for (int i = 0; i < NUM_OUTPUTS; i++) {
       pinMode(OUTPUT_PINS[i], OUTPUT);
