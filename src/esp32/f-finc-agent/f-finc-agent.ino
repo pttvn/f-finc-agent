@@ -199,7 +199,7 @@ ModbusIP mb;
 
 void initModbusTCP() {
   if (modbusTCPConfig.enabled && tcpDevices.size() > 0) {
-    Serial.println("Modbus TCP: Initializing...");
+    Serial.println("*modbusTCP:Initializing...");
     mb.client();
   }
 }
@@ -209,12 +209,12 @@ void pollModbusDevice(ModbusTcpDevice& device) {
     return;
   }
   
-  Serial.printf("Modbus TCP: Polling device %s (%s:%d)\n", device.name.c_str(), device.ip.c_str(), device.port);
+  Serial.printf("*modbusTCP:Polling device %s (%s:%d)\n", device.name.c_str(), device.ip.c_str(), device.port);
   
   // Khởi tạo địa chỉ IP cho thiết bị
   IPAddress serverIP;
   if (!serverIP.fromString(device.ip)) {
-    Serial.println("Modbus TCP: Invalid IP address");
+    Serial.println("*modbusTCP:Invalid IP address");
     device.connected = false;
     return;
   }
@@ -224,7 +224,7 @@ void pollModbusDevice(ModbusTcpDevice& device) {
     mb.connect(serverIP, device.port);
     device.connected = mb.isConnected(serverIP);
     if (!device.connected) {
-      Serial.println("Modbus TCP: Failed to connect");
+      Serial.println("*modbusTCP:Failed to connect");
       return;
     }
   }
@@ -239,43 +239,37 @@ void pollModbusDevice(ModbusTcpDevice& device) {
       device.values.resize(i + 1, 0);
     }
     
-    uint8_t slaveId = 1;  // ID thiết bị Modbus
+    uint8_t slaveId = 1;
     bool success = false;
     uint16_t value = 0;
      
-    // Đọc giá trị từ thanh ghi dựa trên loại
+    // Đọc giá trị từ thanh ghi
     if (reg.type == "coil") {
-      // Đọc coil (0xxxx)
       bool coilValue = false;
       success = mb.readCoil(serverIP, reg.address, &coilValue);
       value = coilValue ? 1 : 0;
     } else if (reg.type == "discrete") {
-      // Đọc discrete input (1xxxx)
       bool discreteValue = false;
       success = mb.readIsts(serverIP, reg.address, &discreteValue);
       value = discreteValue ? 1 : 0;
     } else if (reg.type == "holding") {
-      // Đọc holding register (4xxxx)
       success = mb.readHreg(serverIP, reg.address, &value);
     } else if (reg.type == "input") {
-      // Đọc input register (3xxxx)
       success = mb.readIreg(serverIP, reg.address, &value);
     }
     
     if (success) {
       device.values[i] = value;
       reg.lastReadSuccess = true;
-      Serial.printf("Modbus TCP: Read %s register %d = %d\n", reg.type.c_str(), reg.address, value);
+      Serial.printf("*modbusTCP:Read %s register %d = %d\n", reg.type.c_str(), reg.address, value);
     } else {
       reg.lastReadSuccess = false;
-      Serial.printf("Modbus TCP: Failed to read %s register %d\n", reg.type.c_str(), reg.address);
+      Serial.printf("*modbusTCP:Failed to read %s register %d\n", reg.type.c_str(), reg.address);
     }
   }
   
-  // Cập nhật thời gian poll cuối cùng
+  // Cập nhật thời gian
   device.lastPollTime = millis();
-  
-  // Xử lý các tác vụ Modbus
   mb.task();
 }
 void handleModbusTCPConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
@@ -627,35 +621,11 @@ void setup() {
   });
 
   // Modbus TCP API endpoints
-  server.on("/config/modbus-tcp", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+  server.on("/modbus-tcp/config", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleModbusTCPConfig);
   });
-  server.on("/modbus/device/create", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusDeviceCreate);
-  });
-  server.on("/modbus/device/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusDeviceUpdate);
-  });
-  server.on("/modbus/device/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusDeviceDelete);
-  });
-  server.on("/modbus/register/create", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusRegisterCreate);
-  });
-  server.on("/modbus/register/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusRegisterUpdate);
-  });
-  server.on("/modbus/register/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleJsonBody(request, data, len, index, total, handleModbusRegisterDelete);
-  });
-  server.on("/modbus/devices", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/modbus-tcp/devices", HTTP_GET, [](AsyncWebServerRequest *request) {
     DynamicJsonDocument doc(4096);
     JsonArray devices = doc.createNestedArray("devices");
     
@@ -688,6 +658,30 @@ void setup() {
     String output;
     serializeJson(doc, output);
     request->send(200, "application/json", output);
+  });
+  server.on("/modbus-tcp/device/create", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusDeviceCreate);
+  });
+  server.on("/modbus-tcp/device/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusDeviceUpdate);
+  });
+  server.on("/modbus-tcp/device/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusDeviceDelete);
+  });
+  server.on("/modbus-tcp/register/create", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusRegisterCreate);
+  });
+  server.on("/modbus-tcp/register/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusRegisterUpdate);
+  });
+  server.on("/modbus-tcp/register/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleJsonBody(request, data, len, index, total, handleModbusRegisterDelete);
   });
 
   // FIRMWARE

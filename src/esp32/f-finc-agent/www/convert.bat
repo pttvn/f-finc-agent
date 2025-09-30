@@ -3,7 +3,7 @@ echo Converting webpage.html to a minified single line...
 
 :: Đường dẫn đầy đủ để đảm bảo file được tìm thấy
 set INPUT_FILE=%~dp0webpage.html
-set OUTPUT_FILE=%~dp0webpage.ino
+set OUTPUT_FILE=%~dp0..\webpage.ino
 
 :: Delete output file if it exists
 if exist "%OUTPUT_FILE%" del "%OUTPUT_FILE%"
@@ -18,4 +18,4 @@ echo Content has been copied to clipboard.
 powershell -Command "Get-Content -Path '%OUTPUT_FILE%' | Set-Clipboard"
 echo.
 echo You can paste this content into your webpage.ino file.
-pause
+REM pause
