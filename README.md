@@ -1,4 +1,4 @@
-# f-finc-agent
+# f-FINC Agent
 
 ## Hướng dẫn sử dụng
 
