@@ -8,6 +8,8 @@
 #include <HTTPUpdate.h>
 #include <Update.h>
 #include <ModbusIP_ESP8266.h>
+#include <FS.h>
+#include <SPIFFS.h>
 
 // FIX CONFLICT
 #define HTTP_METHOD_DEF
@@ -61,18 +63,18 @@ unsigned long lastFirmwareCheck = 0;
 
 void handleUpdateFirmware() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("*ota:WiFi not connected! Skipping update check");
+    Serial.println(F("*ota:WiFi not connected! Skipping update check"));
     return;
   }
 
   // Tải Manifest
-  Serial.println("*ota:Checking for firmware updates...");
+  Serial.println(F("*ota:Checking for firmware updates..."));
 
   HTTPClient http;
   http.begin(firmware_manifest_url);
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
-    Serial.printf("*ota:Failed to download manifest, HTTP error (%d): %s\n", httpCode, http.errorToString(httpCode).c_str());
+    Serial.printf(F("*ota:Failed to download manifest, HTTP error (%d): %s\n"), httpCode, http.errorToString(httpCode).c_str());
     http.end();
     return;
   }
@@ -121,7 +123,7 @@ void handleUpdateFirmware() {
           Serial.println("*ota:Update successful! Restarting...");
           ESP.restart();
         } else {
-          Serial.printf("*ota:Update failed: %s\n", Update.errorString());
+          Serial.printf(F("*ota:Update failed: %s\n"), Update.errorString());
         }
       } else {
         Serial.println("*ota:Not enough space to begin OTA update.");
@@ -130,14 +132,14 @@ void handleUpdateFirmware() {
       Serial.println("*ota:No content length in HTTP response.");
     }
   } else {
-    Serial.printf("*ota:HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+    Serial.printf(F("*ota:HTTP GET failed, error: %s\n"), http.errorToString(httpCode).c_str());
   }
 
   /* WiFiClient client;
   t_httpUpdate_return ret = httpUpdate.update(client, binaryUrl);
   switch (ret) {
     case HTTP_UPDATE_FAILED:
-      Serial.printf("OTA Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+      Serial.printf(F("OTA Error (%d): %s\n"), httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
       break;
     case HTTP_UPDATE_NO_UPDATES:
       Serial.println("OTA: No updates needed.");
@@ -150,7 +152,7 @@ void handleUpdateFirmware() {
   http.end();
 }
 
-// Alarm config
+/** Alarm config */
 struct AlarmConfig {
   String condition;
   int defaultInterval;
@@ -197,6 +199,105 @@ std::vector<ModbusTcpDevice> tcpDevices;
 
 ModbusIP mb;
 
+const char* MODBUS_CONFIG_PATH = "/modbus_tcp.json";
+
+bool loadModbusTCPConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*modbusTCP:SPIFFS mount failed while loading");
+    return false;
+  }
+  if (!SPIFFS.exists(MODBUS_CONFIG_PATH)) {
+    Serial.println("*modbusTCP:No existing config, skipping load");
+    return false;
+  }
+  File file = SPIFFS.open(MODBUS_CONFIG_PATH, FILE_READ);
+  if (!file) {
+    Serial.println("*modbusTCP:Failed to open config file for reading");
+    return false;
+  }
+
+  DynamicJsonDocument doc(16384);
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    Serial.print("*modbusTCP:Failed to parse config JSON: ");
+    Serial.println(err.c_str());
+    return false;
+  }
+
+  modbusTCPConfig.enabled = doc["enabled"].as<bool>();
+  tcpDevices.clear();
+  JsonArray devices = doc["devices"].as<JsonArray>();
+  for (JsonObject dev : devices) {
+    ModbusTcpDevice d;
+    d.id = dev["id"].as<String>();
+    d.name = dev["name"].as<String>();
+    d.ip = dev["ip"].as<String>();
+    d.port = dev["port"].as<int>();
+    d.pollInterval = dev["pollInterval"].as<int>();
+    d.enabled = dev["enabled"].as<bool>();
+    d.connected = false;
+    d.lastPollTime = 0;
+    d.values.clear();
+
+    JsonArray regs = dev["registers"].as<JsonArray>();
+    for (JsonObject r : regs) {
+      ModbusTcpRegister reg;
+      reg.name = r["name"].as<String>();
+      reg.address = r["address"].as<int>();
+      reg.type = r["type"].as<String>();
+      reg.byteOrder = r["byteOrder"].as<String>();
+      reg.enabled = r["enabled"].as<bool>();
+      reg.value = 0;
+      reg.lastReadSuccess = false;
+      d.registers.push_back(reg);
+    }
+    tcpDevices.push_back(d);
+  }
+
+  Serial.println("*modbusTCP:Config loaded");
+  return true;
+}
+bool saveModbusTCPConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*modbusTCP:SPIFFS mount failed while saving");
+    return false;
+  }
+  File file = SPIFFS.open(MODBUS_CONFIG_PATH, FILE_WRITE);
+  if (!file) {
+    Serial.println("*modbusTCP:Failed to open config file for writing");
+    return false;
+  }
+
+  DynamicJsonDocument doc(16384);
+  doc["enabled"] = modbusTCPConfig.enabled;
+  JsonArray devices = doc.createNestedArray("devices");
+  for (size_t i = 0; i < tcpDevices.size(); i++) {
+    JsonObject dev = devices.createNestedObject();
+    dev["id"] = tcpDevices[i].id;
+    dev["name"] = tcpDevices[i].name;
+    dev["ip"] = tcpDevices[i].ip;
+    dev["port"] = tcpDevices[i].port;
+    dev["pollInterval"] = tcpDevices[i].pollInterval;
+    dev["enabled"] = tcpDevices[i].enabled;
+
+    JsonArray regs = dev.createNestedArray("registers");
+    for (size_t j = 0; j < tcpDevices[i].registers.size(); j++) {
+      JsonObject r = regs.createNestedObject();
+      r["name"] = tcpDevices[i].registers[j].name;
+      r["address"] = tcpDevices[i].registers[j].address;
+      r["type"] = tcpDevices[i].registers[j].type;
+      r["byteOrder"] = tcpDevices[i].registers[j].byteOrder;
+      r["enabled"] = tcpDevices[i].registers[j].enabled;
+    }
+  }
+
+  bool ok = (serializeJson(doc, file) > 0);
+  file.close();
+  if (!ok) Serial.println(F("*modbusTCP:Config save failed"));
+  return ok;
+}
+
 void initModbusTCP() {
   if (modbusTCPConfig.enabled && tcpDevices.size() > 0) {
     Serial.println("*modbusTCP:Initializing...");
@@ -209,7 +310,7 @@ void pollModbusDevice(ModbusTcpDevice& device) {
     return;
   }
   
-  Serial.printf("*modbusTCP:Polling device %s (%s:%d)\n", device.name.c_str(), device.ip.c_str(), device.port);
+  Serial.printf(F("*modbusTCP:Polling device %s (%s:%d)\n"), device.name.c_str(), device.ip.c_str(), device.port);
   
   // Khởi tạo địa chỉ IP cho thiết bị
   IPAddress serverIP;
@@ -240,31 +341,44 @@ void pollModbusDevice(ModbusTcpDevice& device) {
     }
     
     uint8_t slaveId = 1;
-    bool success = false;
+    bool requestOk = false;
     uint16_t value = 0;
-     
-    // Đọc giá trị từ thanh ghi
+
+    // Đọc giá trị từ thanh ghi (gửi yêu cầu)
+    bool coilValue = false;
+    bool discreteValue = false;
     if (reg.type == "coil") {
-      bool coilValue = false;
-      success = mb.readCoil(serverIP, reg.address, &coilValue);
-      value = coilValue ? 1 : 0;
+      requestOk = mb.readCoil(serverIP, reg.address, &coilValue, 1, nullptr, slaveId);
     } else if (reg.type == "discrete") {
-      bool discreteValue = false;
-      success = mb.readIsts(serverIP, reg.address, &discreteValue);
-      value = discreteValue ? 1 : 0;
+      requestOk = mb.readIsts(serverIP, reg.address, &discreteValue, 1, nullptr, slaveId);
     } else if (reg.type == "holding") {
-      success = mb.readHreg(serverIP, reg.address, &value);
+      requestOk = mb.readHreg(serverIP, reg.address, &value, 1, nullptr, slaveId);
     } else if (reg.type == "input") {
-      success = mb.readIreg(serverIP, reg.address, &value);
+      requestOk = mb.readIreg(serverIP, reg.address, &value, 1, nullptr, slaveId);
     }
-    
-    if (success) {
+
+    // Chờ phản hồi ngắn để đảm bảo dữ liệu được cập nhật vào buffer
+    // Thư viện ModbusIP hoạt động bất đồng bộ, cần gọi task() để xử lý gói tin.
+    if (requestOk) {
+      unsigned long start = millis();
+      // Gọi task() vài lần trong ~100-200ms để xử lý phản hồi
+      while (millis() - start < 150) {
+        mb.task();
+        delay(10);
+      }
+      // Sau khi task() xử lý xong, các biến buffer sẽ được ghi giá trị
+      if (reg.type == "coil") {
+        value = coilValue ? 1 : 0;
+      } else if (reg.type == "discrete") {
+        value = discreteValue ? 1 : 0;
+      }
+
       device.values[i] = value;
       reg.lastReadSuccess = true;
-      Serial.printf("*modbusTCP:Read %s register %d = %d\n", reg.type.c_str(), reg.address, value);
+      Serial.printf(F("*modbusTCP:Read %s register %d = %d\n"), reg.type.c_str(), reg.address, value);
     } else {
       reg.lastReadSuccess = false;
-      Serial.printf("*modbusTCP:Failed to read %s register %d\n", reg.type.c_str(), reg.address);
+      Serial.printf(F("*modbusTCP:Failed to read %s register %d\n"), reg.type.c_str(), reg.address);
     }
   }
   
@@ -272,8 +386,10 @@ void pollModbusDevice(ModbusTcpDevice& device) {
   device.lastPollTime = millis();
   mb.task();
 }
+
 void handleModbusTCPConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
   modbusTCPConfig.enabled = doc["enabled"].as<bool>();
+  saveModbusTCPConfig();
   request->send(200, "application/json", "{\"success\":true}");
 }
 void handleModbusDeviceCreate(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
@@ -287,6 +403,7 @@ void handleModbusDeviceCreate(AsyncWebServerRequest *request, DynamicJsonDocumen
   device.connected = false;
   
   tcpDevices.push_back(device);
+  saveModbusTCPConfig();
   request->send(200, "application/json", "{\"success\":true}");
 }
 void handleModbusDeviceUpdate(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
@@ -299,6 +416,7 @@ void handleModbusDeviceUpdate(AsyncWebServerRequest *request, DynamicJsonDocumen
       tcpDevices[i].port = doc["port"].as<int>();
       tcpDevices[i].pollInterval = doc["pollInterval"].as<int>();
       tcpDevices[i].enabled = doc["enabled"].as<bool>();
+      saveModbusTCPConfig();
       request->send(200, "application/json", "{\"success\":true}");
       return;
     }
@@ -312,6 +430,7 @@ void handleModbusDeviceDelete(AsyncWebServerRequest *request, DynamicJsonDocumen
   for (size_t i = 0; i < tcpDevices.size(); i++) {
     if (tcpDevices[i].id == id) {
       tcpDevices.erase(tcpDevices.begin() + i);
+      saveModbusTCPConfig();
       request->send(200, "application/json", "{\"success\":true}");
       return;
     }
@@ -328,10 +447,11 @@ void handleModbusRegisterCreate(AsyncWebServerRequest *request, DynamicJsonDocum
       reg.name = doc["name"].as<String>();
       reg.address = doc["address"].as<int>();
       reg.type = doc["type"].as<String>();
-      reg.byteOrder = doc["byteOrder"].as<int>();
+      reg.byteOrder = doc["byteOrder"].as<String>();
       reg.enabled = doc["enabled"].as<bool>();
       
       tcpDevices[i].registers.push_back(reg);
+      saveModbusTCPConfig();
       request->send(200, "application/json", "{\"success\":true}");
       return;
     }
@@ -348,9 +468,10 @@ void handleModbusRegisterUpdate(AsyncWebServerRequest *request, DynamicJsonDocum
       tcpDevices[i].registers[regIndex].name = doc["name"].as<String>();
       tcpDevices[i].registers[regIndex].address = doc["address"].as<int>();
       tcpDevices[i].registers[regIndex].type = doc["type"].as<String>();
-      tcpDevices[i].registers[regIndex].byteOrder = doc["byteOrder"].as<int>();
+      tcpDevices[i].registers[regIndex].byteOrder = doc["byteOrder"].as<String>();
       tcpDevices[i].registers[regIndex].enabled = doc["enabled"].as<bool>();
       
+      saveModbusTCPConfig();
       request->send(200, "application/json", "{\"success\":true}");
       return;
     }
@@ -365,6 +486,7 @@ void handleModbusRegisterDelete(AsyncWebServerRequest *request, DynamicJsonDocum
   for (size_t i = 0; i < tcpDevices.size(); i++) {
     if (tcpDevices[i].id == deviceId && regIndex >= 0 && regIndex < tcpDevices[i].registers.size()) {
       tcpDevices[i].registers.erase(tcpDevices[i].registers.begin() + regIndex);
+      saveModbusTCPConfig();
       request->send(200, "application/json", "{\"success\":true}");
       return;
     }
@@ -386,6 +508,67 @@ struct MqttConfig {
   String password;
   bool enabled;
 } mqttConfig = {"test.mosquitto.org", 1883, "f-finc/data/01", "user", "pass", false};
+
+const char* MQTT_CONFIG_PATH = "/mqtt.json";
+
+bool loadMqttConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*mqtt:SPIFFS mount failed while loading");
+    return false;
+  }
+  if (!SPIFFS.exists(MQTT_CONFIG_PATH)) {
+    Serial.println("*mqtt:No existing config, skipping load");
+    return false;
+  }
+  File file = SPIFFS.open(MQTT_CONFIG_PATH, FILE_READ);
+  if (!file) {
+    Serial.println("*mqtt:Failed to open config file for reading");
+    return false;
+  }
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    Serial.print("*mqtt:Failed to parse config JSON: ");
+    Serial.println(err.c_str());
+    return false;
+  }
+
+  mqttConfig.enabled = doc["enabled"].as<bool>();
+  mqttConfig.url = doc["url"].as<String>();
+  mqttConfig.port = doc["port"].as<int>();
+  mqttConfig.topic = doc["topic"].as<String>();
+  mqttConfig.username = doc["username"].as<String>();
+  mqttConfig.password = doc["password"].as<String>();
+
+  Serial.println("*mqtt:Config loaded");
+  return true;
+}
+bool saveMqttConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*mqtt:SPIFFS mount failed while saving");
+    return false;
+  }
+  File file = SPIFFS.open(MQTT_CONFIG_PATH, FILE_WRITE);
+  if (!file) {
+    Serial.println("*mqtt:Failed to open config file for writing");
+    return false;
+  }
+
+  DynamicJsonDocument doc(1024);
+  doc["enabled"] = mqttConfig.enabled;
+  doc["url"] = mqttConfig.url;
+  doc["port"] = mqttConfig.port;
+  doc["topic"] = mqttConfig.topic;
+  doc["username"] = mqttConfig.username;
+  doc["password"] = mqttConfig.password;
+
+  bool ok = (serializeJson(doc, file) > 0);
+  file.close();
+  if (!ok) Serial.println(F("*mqtt:Config save failed"));
+  return ok;
+}
 
 void reconnectMqtt() {
   if (!mqttConfig.enabled) return;
@@ -430,7 +613,7 @@ void handleMqttConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) 
     } else if (mqttClient.connected()) {
         mqttClient.disconnect();
     }
-
+    saveMqttConfig();
     request->send(200, "application/json", "{\"success\":true}");
 }
 
@@ -441,6 +624,63 @@ struct ApiConfig {
   String password;
   bool enabled;
 } apiConfig = {"http://your-api.com/data", "apiuser", "apipass", false};
+
+const char* API_CONFIG_PATH = "/api.json";
+
+bool loadApiConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*api:SPIFFS mount failed while loading");
+    return false;
+  }
+  if (!SPIFFS.exists(API_CONFIG_PATH)) {
+    Serial.println("*api:No existing config, skipping load");
+    return false;
+  }
+  File file = SPIFFS.open(API_CONFIG_PATH, FILE_READ);
+  if (!file) {
+    Serial.println("*api:Failed to open config file for reading");
+    return false;
+  }
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    Serial.print("*api:Failed to parse config JSON: ");
+    Serial.println(err.c_str());
+    return false;
+  }
+
+  apiConfig.enabled = doc["enabled"].as<bool>();
+  apiConfig.url = doc["url"].as<String>();
+  apiConfig.username = doc["username"].as<String>();
+  apiConfig.password = doc["password"].as<String>();
+
+  Serial.println("*api:Config loaded");
+  return true;
+}
+bool saveApiConfig() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("*api:SPIFFS mount failed while saving");
+    return false;
+  }
+  File file = SPIFFS.open(API_CONFIG_PATH, FILE_WRITE);
+  if (!file) {
+    Serial.println("*api:Failed to open config file for writing");
+    return false;
+  }
+
+  DynamicJsonDocument doc(1024);
+  doc["enabled"] = apiConfig.enabled;
+  doc["url"] = apiConfig.url;
+  doc["username"] = apiConfig.username;
+  doc["password"] = apiConfig.password;
+
+  bool ok = (serializeJson(doc, file) > 0);
+  file.close();
+  if (!ok) Serial.println(F("*api:Config save failed"));
+  return ok;
+}
 
 void sendApiData(const String& payload) {
   if (!apiConfig.enabled) {
@@ -474,6 +714,7 @@ void handleApiConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
   apiConfig.username = doc["username"].as<String>();
   apiConfig.password = doc["password"].as<String>();
   apiConfig.enabled = doc["enabled"].as<bool>();
+  saveApiConfig();
   request->send(200, "application/json", "{\"success\":true}");
 }
 void handlePostApiData(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
@@ -481,33 +722,166 @@ void handlePostApiData(AsyncWebServerRequest *request, DynamicJsonDocument& doc)
   request->send(200, "application/json", "{\"success\":true}");
 }
 
+/** Network Config */
+struct NetworkConfig {
+  bool useStaticIP;
+  String ipAddress;
+  String subnetMask;
+  String gateway;
+} networkConfig = {false, "", "", ""};
+
+// Build aggregated status JSON payload (IO + System + Network + Modbus)
+String buildAggregatedStatusPayload() {
+  DynamicJsonDocument doc(32768);
+  JsonObject system = doc.createNestedObject("system");
+  system["firmware_version"] = FIRMWARE_VERSION;
+  system["ram_total"] = ESP.getHeapSize();
+  system["ram_free"] = ESP.getFreeHeap();
+  system["flash_total"] = ESP.getFlashChipSize();
+  system["flash_used"] = ESP.getSketchSize();
+  system["flash_free_update"] = ESP.getFreeSketchSpace();
+  system["cpu_freq"] = ESP.getCpuFreqMHz();
+  system["cpu_cores"] = ESP.getChipCores();
+
+  JsonObject network = doc.createNestedObject("network");
+  network["mode"] = networkConfig.useStaticIP ? "static" : "dhcp";
+  network["ip"] = WiFi.localIP().toString();
+
+  JsonArray inputs = doc.createNestedArray("inputs");
+  JsonArray outputs = doc.createNestedArray("outputs");
+  for (int i = 0; i < NUM_INPUTS; i++) {
+    JsonObject input = inputs.createNestedObject();
+    input["id"] = i + 1;
+    input["state"] = (digitalRead(INPUT_PINS[i]) == LOW);
+  }
+  for (int i = 0; i < NUM_OUTPUTS; i++) {
+    JsonObject output = outputs.createNestedObject();
+    output["id"] = i + 1;
+    output["state"] = outputStates[i];
+  }
+
+  JsonObject modbus = doc.createNestedObject("modbus");
+  modbus["enabled"] = modbusTCPConfig.enabled;
+  JsonArray devices = modbus.createNestedArray("devices");
+  for (size_t i = 0; i < tcpDevices.size(); i++) {
+    JsonObject dev = devices.createNestedObject();
+    dev["id"] = tcpDevices[i].id;
+    dev["name"] = tcpDevices[i].name;
+    dev["ip"] = tcpDevices[i].ip;
+    dev["port"] = tcpDevices[i].port;
+    dev["enabled"] = tcpDevices[i].enabled;
+    JsonArray regs = dev.createNestedArray("registers");
+    for (size_t j = 0; j < tcpDevices[i].registers.size(); j++) {
+      JsonObject reg = regs.createNestedObject();
+      reg["name"] = tcpDevices[i].registers[j].name;
+      reg["address"] = tcpDevices[i].registers[j].address;
+      reg["type"] = tcpDevices[i].registers[j].type;
+      reg["byteOrder"] = tcpDevices[i].registers[j].byteOrder;
+      reg["enabled"] = tcpDevices[i].registers[j].enabled;
+      if (j < tcpDevices[i].values.size()) {
+        reg["value"] = tcpDevices[i].values[j];
+      }
+    }
+  }
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+const char* NETWORK_CONFIG_PATH = "/network.json";
+
+bool loadNetworkConfig() {
+  if (!SPIFFS.begin(true)) {
+    return false;
+  }
+  if (!SPIFFS.exists(NETWORK_CONFIG_PATH)) {
+    return false;
+  }
+  File file = SPIFFS.open(NETWORK_CONFIG_PATH, FILE_READ);
+  if (!file) {
+    return false;
+  }
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    return false;
+  }
+  networkConfig.useStaticIP = doc["useStaticIP"].as<bool>();
+  networkConfig.ipAddress = doc["ipAddress"].as<String>();
+  networkConfig.subnetMask = doc["subnetMask"].as<String>();
+  networkConfig.gateway = doc["gateway"].as<String>();
+  return true;
+}
+bool saveNetworkConfig() {
+  if (!SPIFFS.begin(true)) {
+    return false;
+  }
+  File file = SPIFFS.open(NETWORK_CONFIG_PATH, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+  DynamicJsonDocument doc(512);
+  doc["useStaticIP"] = networkConfig.useStaticIP;
+  doc["ipAddress"] = networkConfig.ipAddress;
+  doc["subnetMask"] = networkConfig.subnetMask;
+  doc["gateway"] = networkConfig.gateway;
+  bool ok = (serializeJson(doc, file) > 0);
+  file.close();
+  return ok;
+}
+void handleNetworkConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
+    bool staticIp = doc["staticIp"].as<bool>();
+    String ip = doc["ipAddress"].as<String>();
+    String subnet = doc["subnetMask"].as<String>();
+    String gw = doc["gateway"].as<String>();
+
+    networkConfig.useStaticIP = staticIp;
+    networkConfig.ipAddress = ip;
+    networkConfig.subnetMask = subnet;
+    networkConfig.gateway = gw;
+
+    bool ok = saveNetworkConfig();
+    request->send(200, "application/json", String("{\"success\":") + (ok ? "true" : "false") + "}");
+
+    if (ok) {
+      // Restart shortly to apply new IP settings cleanly
+      xTaskCreate([](void* pvParameters) {
+          delay(200);
+          ESP.restart();
+          vTaskDelete(NULL);
+        },
+        "netcfgRestart", 2048, NULL, 1, NULL
+      );
+    }
+}
+
 /** Web Server */
 extern const char index_html[] PROGMEM;
 void handleJsonBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total, void (*handler)(AsyncWebServerRequest*, DynamicJsonDocument&)) {
-  if (index + len == total) {
-    String body = "";
-    for (size_t i = 0; i < len; i++) {
-      body += (char)data[i];
-    }
+  // Handle both chunked and non-chunked bodies. If total==0, treat current chunk as full body.
+  bool isLastChunk = (index + len == total) || (total == 0);
+  if (!isLastChunk) return;
 
-    DynamicJsonDocument doc(1024);
-    DeserializationError error = deserializeJson(doc, body);
-    if (error) {
-      request->send(400, "application/json", "{\"error\":\"Invalid JSON body\"}");
-      return;
-    }
-    handler(request, doc);
+  String body = "";
+  for (size_t i = 0; i < len; i++) {
+    body += (char)data[i];
   }
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, body);
+  if (error) {
+    request->send(400, "application/json", "{\"error\":\"Invalid JSON body\"}");
+    return;
+  }
+  handler(request, doc);
 }
 void handleLogin(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
     String username = doc["username"];
     String password = doc["password"];
     bool success = (username == "admin" && password == "admin");
     request->send(200, "application/json", "{\"success\":" + String(success ? "true" : "false") + "}");
-}
-void handleNetworkConfig(AsyncWebServerRequest *request, DynamicJsonDocument& doc) {
-    bool staticIp = doc["staticIp"];
-    request->send(200, "application/json", "{\"success\":true}");
 }
 
 AsyncWebServer server(80);
@@ -534,15 +908,34 @@ void setup() {
 
   // Wifi manager
   WiFiManager wm;
-  if (!wm.autoConnect("F-FINC_ESP32_SETUP", "12345678")) {
+  loadNetworkConfig();
+  if (networkConfig.useStaticIP) {
+    IPAddress ip, gw, subnet;
+    if (ip.fromString(networkConfig.ipAddress) &&
+        gw.fromString(networkConfig.gateway) &&
+        subnet.fromString(networkConfig.subnetMask)) {
+      wm.setSTAStaticIPConfig(ip, gw, subnet);
+    }
+  }
+  if (!wm.autoConnect("f-FINC Agent Setup", "12345678")) {
     delay(3000);
     ESP.restart();
   }
 
   // MQTT Services
+  loadMqttConfig();
   if (mqttConfig.enabled) {
     mqttClient.setServer(mqttConfig.url.c_str(), mqttConfig.port);
     reconnectMqtt();
+  }
+
+  // Load API config
+  loadApiConfig();
+
+  // Initialize Modbus TCP if enabled
+  loadModbusTCPConfig();
+  if (modbusTCPConfig.enabled) {
+    initModbusTCP();
   }
 
   // Web services
@@ -599,6 +992,28 @@ void setup() {
     serializeJson(doc, output);
     request->send(200, "application/json", output);
   });
+  server.on("/config/api", HTTP_GET, [](AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(512);
+    doc["enabled"] = apiConfig.enabled;
+    doc["url"] = apiConfig.url;
+    doc["username"] = apiConfig.username;
+    doc["password"] = apiConfig.password;
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+  server.on("/config/mqtt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(512);
+    doc["enabled"] = mqttConfig.enabled;
+    doc["url"] = mqttConfig.url;
+    doc["port"] = mqttConfig.port;
+    doc["topic"] = mqttConfig.topic;
+    doc["username"] = mqttConfig.username;
+    doc["password"] = mqttConfig.password;
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
   server.on("/config/mqtt", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleMqttConfig);
@@ -606,6 +1021,18 @@ void setup() {
   server.on("/config/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleApiConfig);
+  });
+  server.on("/config/network", HTTP_GET, [](AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(512);
+    doc["useStaticIP"] = networkConfig.useStaticIP;
+    doc["ipAddress"] = networkConfig.ipAddress;
+    doc["subnetMask"] = networkConfig.subnetMask;
+    doc["gateway"] = networkConfig.gateway;
+    doc["currentIp"] = WiFi.localIP().toString();
+    doc["mode"] = networkConfig.useStaticIP ? "static" : "dhcp";
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
   });
   server.on("/config/network", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -620,10 +1047,16 @@ void setup() {
       handleJsonBody(request, data, len, index, total, handlePostApiData);
   });
 
-  // Modbus TCP API endpoints
   server.on("/modbus-tcp/config", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleModbusTCPConfig);
+  });
+  server.on("/modbus-tcp/config", HTTP_GET, [](AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(256);
+    doc["enabled"] = modbusTCPConfig.enabled;
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
   });
   server.on("/modbus-tcp/devices", HTTP_GET, [](AsyncWebServerRequest *request) {
     DynamicJsonDocument doc(4096);
@@ -659,6 +1092,76 @@ void setup() {
     serializeJson(doc, output);
     request->send(200, "application/json", output);
   });
+  // Aggregated status endpoint
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // Build a single JSON containing IO, system, network and modbus snapshot
+    DynamicJsonDocument doc(32768);
+
+    // System info
+    JsonObject system = doc.createNestedObject("system");
+    system["firmware_version"] = FIRMWARE_VERSION;
+    system["ram_total"] = ESP.getHeapSize();
+    system["ram_free"] = ESP.getFreeHeap();
+    system["flash_total"] = ESP.getFlashChipSize();
+    system["flash_used"] = ESP.getSketchSize();
+    system["flash_free_update"] = ESP.getFreeSketchSpace();
+    system["cpu_freq"] = ESP.getCpuFreqMHz();
+    system["cpu_cores"] = ESP.getChipCores();
+
+    // Network quick info
+    JsonObject network = doc.createNestedObject("network");
+    network["mode"] = networkConfig.useStaticIP ? "static" : "dhcp";
+    network["ip"] = WiFi.localIP().toString();
+
+    // IO status
+    JsonArray inputs = doc.createNestedArray("inputs");
+    JsonArray outputs = doc.createNestedArray("outputs");
+    for (int i = 0; i < NUM_INPUTS; i++) {
+      JsonObject input = inputs.createNestedObject();
+      input["id"] = i + 1;
+      input["state"] = (digitalRead(INPUT_PINS[i]) == LOW);
+    }
+    for (int i = 0; i < NUM_OUTPUTS; i++) {
+      JsonObject output = outputs.createNestedObject();
+      output["id"] = i + 1;
+      output["state"] = outputStates[i];
+    }
+
+    // Modbus snapshot (devices and registers with last read values)
+    JsonObject modbus = doc.createNestedObject("modbus");
+    modbus["enabled"] = modbusTCPConfig.enabled;
+    JsonArray devices = modbus.createNestedArray("devices");
+    for (size_t i = 0; i < tcpDevices.size(); i++) {
+      JsonObject device = devices.createNestedObject();
+      device["id"] = tcpDevices[i].id;
+      device["name"] = tcpDevices[i].name;
+      device["ip"] = tcpDevices[i].ip;
+      device["port"] = tcpDevices[i].port;
+      device["pollInterval"] = tcpDevices[i].pollInterval;
+      device["enabled"] = tcpDevices[i].enabled;
+      device["connected"] = tcpDevices[i].connected;
+
+      JsonArray registers = device.createNestedArray("registers");
+      for (size_t j = 0; j < tcpDevices[i].registers.size(); j++) {
+        JsonObject reg = registers.createNestedObject();
+        reg["name"] = tcpDevices[i].registers[j].name;
+        reg["address"] = tcpDevices[i].registers[j].address;
+        reg["type"] = tcpDevices[i].registers[j].type;
+        reg["byteOrder"] = tcpDevices[i].registers[j].byteOrder;
+        reg["enabled"] = tcpDevices[i].registers[j].enabled;
+        reg["lastReadSuccess"] = tcpDevices[i].registers[j].lastReadSuccess;
+        if (j < tcpDevices[i].values.size()) {
+          reg["value"] = tcpDevices[i].values[j];
+        }
+      }
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+  });
+
+  // Helper removed from setup scope; replaced by global function definition
   server.on("/modbus-tcp/device/create", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       handleJsonBody(request, data, len, index, total, handleModbusDeviceCreate);
@@ -684,7 +1187,6 @@ void setup() {
       handleJsonBody(request, data, len, index, total, handleModbusRegisterDelete);
   });
 
-  // FIRMWARE
   server.on("/firmware/update", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (index + len == total) {
       String body;
@@ -710,11 +1212,6 @@ void setup() {
 
   // START
   server.begin();
-  
-  // Initialize Modbus TCP if enabled
-  if (modbusTCPConfig.enabled) {
-    initModbusTCP();
-  }
 }
 
 /** LOOP */
@@ -730,8 +1227,7 @@ void loop() {
   if (modbusTCPConfig.enabled) {
     unsigned long currentMillis = millis();
     for (auto& device : tcpDevices) {
-      if (device.enabled && (currentMillis - modbusTCPConfig.lastPoll >= device.pollInterval)) {
-        modbusTCPConfig.lastPoll = currentMillis;
+      if (device.enabled && (currentMillis - device.lastPollTime >= device.pollInterval)) {
         pollModbusDevice(device);
       }
     }
@@ -739,9 +1235,10 @@ void loop() {
 
   // Logging data
   if (millis() - lastDataSend >= DATA_SEND_INTERVAL) {
-    String payload = readAndSerializeData();
-    sendMqttData(payload);
-    sendApiData(payload);
+    String mqttPayload = readAndSerializeData();
+    sendMqttData(mqttPayload);
+    String apiPayload = buildAggregatedStatusPayload();
+    sendApiData(apiPayload);
     lastDataSend = millis();
   }
 

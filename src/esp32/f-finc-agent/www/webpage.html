@@ -76,6 +76,7 @@
     h1 {
       color: var(--primary-color);
       padding: var(--spacing-4) var(--spacing-6);
+      padding-left: 260px;
       margin: 0;
       background: linear-gradient(90deg, #fff, #f1f5f9);
       border-bottom: 1px solid var(--border-color);
@@ -129,12 +130,25 @@
       flex-grow: 1;
       padding: 0;
       max-width: 1200px;
-      margin: 0 auto;
-      width: 100%;
+      width: calc(100% - 240px);
+      margin-left: 240px;
       display: flex;
       flex-direction: column;
+      /* Make content the scroll container below the fixed header */
+      height: calc(100vh - 80px);
+      margin-top: 80px;
       overflow-y: auto;
-      padding-top: 60px; /* Thêm padding-top để tránh nội dung bị che khi header fixed */
+    }
+
+    /* Logged-out: full width content without sidebar offset */
+    body.logged-out .content {
+      margin-left: 0;
+      width: 100%;
+    }
+
+    /* Logged-out: page title aligns normally without sidebar space */
+    body.logged-out h1 {
+      padding-left: var(--spacing-6);
     }
 
     .section {
@@ -148,6 +162,17 @@
       position: relative;
       overflow: visible;
       flex: 1;
+    }
+
+    #loginSection {
+      max-width: 480px;
+      flex: 0 0 auto;
+      align-self: center;
+      margin-left: auto;
+      margin-right: auto;
+      margin-top: auto;
+      margin-bottom: auto;
+      text-align: center;
     }
 
     .section h2 {
@@ -232,16 +257,67 @@
       transform: translateY(0);
       box-shadow: var(--shadow-sm);
     }
+    /* Compact icon buttons for table actions */
+    .btn-icon {
+      background: #f8fafc;
+      color: var(--text-dark);
+      padding: 6px;
+      margin: 0 4px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      width: 32px;
+      height: 32px;
+      min-height: 0;
+      box-shadow: none;
+    }
+    .btn-icon:hover {
+      background: #edf2f7;
+      box-shadow: var(--shadow-sm);
+      transform: none;
+    }
+    .btn-icon svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+    .btn-icon.primary { color: var(--primary-color); border-color: var(--primary-light); }
+    .btn-icon.success { color: var(--success-color); border-color: var(--success-light); }
+    .btn-icon.danger { color: var(--danger-color); border-color: var(--danger-light); }
 
     .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
       width: 240px;
       min-width: 240px;
       background: var(--bg-dark);
-      padding-top: var(--spacing-4);
+      padding-top: 78px;
       box-shadow: var(--shadow-lg);
       display: none;
       border-right: 1px solid rgba(255, 255, 255, 0.1);
-      z-index: 10;
+      z-index: 1100;
+    }
+
+    .navbar-brand {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 240px;
+      height: 78px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--spacing-2);
+      background: var(--bg-dark);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 1101;
+    }
+
+    .navbar-brand svg {
+      width: 28px;
+      height: 28px;
+      fill: var(--primary-color);
     }
 
     .navbar a {
@@ -433,6 +509,12 @@
       .container {
         flex-direction: column;
       }
+      .content {
+        margin-left: 0;
+        width: 100%;
+        height: calc(100vh - 120px);
+        margin-top: 120px;
+      }
 
       .navbar {
         width: 100%;
@@ -443,10 +525,11 @@
         position: sticky;
         top: 70px;
         z-index: 100;
-        background-color: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(5px);
+        background: var(--bg-dark);
+        backdrop-filter: none;
         box-shadow: var(--shadow-md);
       }
+      .navbar-brand { display: none; }
 
       .navbar a {
         flex: 1 1 auto;
@@ -454,6 +537,7 @@
         padding: var(--spacing-3) var(--spacing-2);
         border-left: none;
         border-bottom: 3px solid transparent;
+        color: var(--text-light);
         white-space: nowrap;
       }
 
@@ -469,6 +553,7 @@
       h1 {
         font-size: 1.5rem;
         padding: var(--spacing-4);
+        padding-left: var(--spacing-4);
       }
 
       .section {
@@ -487,6 +572,13 @@
       h1 {
         font-size: 1.25rem;
         padding: var(--spacing-3);
+        padding-left: var(--spacing-3);
+      }
+      .content {
+        margin-left: 0;
+        width: 100%;
+        height: calc(100vh - 120px);
+        margin-top: 120px;
       }
 
       .section {
@@ -503,15 +595,27 @@
       }
 
       .navbar {
+        position: sticky;
+        top: 60px;
+        left: 0;
+        width: 100%;
+        padding: var(--spacing-2);
         justify-content: space-between;
       }
+      .navbar-brand { display: none; }
     }
   </style>
 </head>
 
-<body onload="checkLoginStatus(),fetchIOStatus(),fetchSystemInfo(),fetchModbusDevices()">
+<body onload="checkLoginStatus(),fetchAllStatus(),fetchNetworkConfig(),fetchMqttConfig(),fetchApiConfig()">
   <div class="container">
     <div class="navbar" id="mainNavbar">
+      <div class="navbar-brand">
+        <!-- Microchip/Hardware icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M7 2h2v3H7V2zm4 0h2v3h-2V2zm4 0h2v3h-2V2zM7 19h2v3H7v-3zm4 0h2v3h-2v-3zm4 0h2v3h-2v-3zM2 7h3v2H2V7zm0 4h3v2H2v-2zm0 4h3v2H2v-2zm17-8h3v2h-3V7zm0 4h3v2h-3v-2zm0 4h3v2h-3v-2zM6 6h12v12H6V6zm3 3v6h6V9H9z" />
+        </svg>
+      </div>
       <a href="#" class="nav-item active" onclick="showSection('ioStatusSection', this)">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
           <path
@@ -559,10 +663,7 @@
     </div>
     <div class="content">
       <h1 id="pageTitle">
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15H9v-2h2v2zm0-4H9v-2h2v2zm0-4H9V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z" />
-        </svg>f-FINC Agent
+        f-FINC Agent
         <button onclick="logout()" id="logoutBtn"
           style="margin-left: auto; padding: 5px 10px; font-size: 0.9rem; min-height: auto;" class="hidden">Đăng
           xuất</button>
@@ -624,13 +725,14 @@
         <h2>Network Configuration</h2>
         <p>
           The device will create an AP if WiFi connection fails. Use
-          <strong>FINC_ESP32_SETUP</strong> / <strong>12345678</strong> to reconfigure.
+          <strong>f-FINC Agent Setup</strong> / <strong>12345678</strong> to reconfigure.
         </p>
         <input type="checkbox" id="useStaticIP" /> Use Static IP<br />
         <input type="text" id="ipAddress" placeholder="IP Address (e.g., 192.168.1.10)" />
         <input type="text" id="subnetMask" placeholder="Subnet Mask (e.g., 255.255.255.0)" />
         <input type="text" id="gateway" placeholder="Gateway (e.g., 192.168.1.1)" />
         <button onclick="saveNetworkConfig()">Save Config</button>
+        <p id="currentIPStatus" style="color: var(--text-medium); margin-top: var(--spacing-2);"></p>
       </div>
       <div class="section hidden" id="alarmConfigSection">
         <h2>Alarm Configuration</h2>
@@ -689,6 +791,7 @@
           <h4 style="margin-top: 0">Register Configuration</h4>
           <input type="hidden" id="registerId" />
           <input type="hidden" id="registerDeviceId" />
+          <input type="hidden" id="registerIndex" />
           <select id="registerType">
             <option value="coil">Coil</option>
             <option value="discrete">Discrete Input</option>
@@ -756,20 +859,38 @@
     const numOutputs = 8;
 
     function showSection(sectionId, navItem) {
+      // Hide all sections safely
       configSections.forEach((id) => {
-        document.getElementById(id).classList.add("hidden");
+        const el = document.getElementById(id);
+        if (el) el.classList.add("hidden");
       });
-      document.getElementById(sectionId).classList.remove("hidden");
+
+      // Show target section if exists
+      const sectionEl = document.getElementById(sectionId);
+      if (sectionEl) sectionEl.classList.remove("hidden");
+
+      // Reset active state on all nav items
       document.querySelectorAll(".nav-item").forEach((item) => {
         item.classList.remove("active");
       });
-      navItem.classList.add("active");
+
+      // Fallback: if navItem is null (e.g., called programmatically), find the matching item
+      if (!navItem) {
+        navItem = document.querySelector(`.nav-item[onclick*="${sectionId}"]`);
+      }
+
+      // Apply active state if we found a nav item
+      if (navItem) {
+        navItem.classList.add("active");
+      }
     }
     function showConfigSections() {
       document.getElementById("loginSection").classList.add("hidden");
       document.getElementById("mainNavbar").style.display = "block";
       document.querySelector(".container").style.display = "flex";
       document.getElementById("logoutBtn").classList.remove("hidden");
+      document.body.classList.add("logged-in");
+      document.body.classList.remove("logged-out");
       showSection(
         "ioStatusSection",
         document.querySelector("#mainNavbar .nav-item:first-child")
@@ -781,6 +902,10 @@
       if (localStorage.getItem('isLoggedIn') === 'true') {
         // Nếu đã đăng nhập, hiển thị các phần cấu hình
         showConfigSections();
+      } else {
+        // Chưa đăng nhập: đánh dấu trạng thái logged-out để bỏ sidebar offset
+        document.body.classList.add("logged-out");
+        document.body.classList.remove("logged-in");
       }
     }
     async function login() {
@@ -814,6 +939,9 @@
       document.querySelectorAll(".section:not(#loginSection)").forEach(section => {
         section.classList.add("hidden");
       });
+      // Đánh dấu trạng thái logged-out để bỏ sidebar offset
+      document.body.classList.add("logged-out");
+      document.body.classList.remove("logged-in");
     }
 
     /** IO Status */
@@ -952,7 +1080,90 @@
       setTimeout(fetchSystemInfo, 10000);
     }
 
+    // Aggregated status fetch: IO + System + Modbus in one request
+    async function fetchAllStatus() {
+      try {
+        const response = await fetch("/status");
+        if (!response.ok) throw new Error("status fetch failed");
+        const data = await response.json();
+
+        // IO
+        (data.inputs || []).forEach((input) => {
+          const led = document.getElementById(`input${input.id}Led`);
+          const stateText = document.getElementById(`input${input.id}State`);
+          if (led && stateText) {
+            led.classList.remove("led-off", "led-on");
+            led.classList.add(input.state ? "led-on" : "led-off");
+            stateText.innerText = input.state ? "ON" : "OFF";
+          }
+        });
+        (data.outputs || []).forEach((output) => {
+          updateOutputDisplay(output.id, output.state);
+        });
+
+        // System
+        if (data.system) {
+          const s = data.system;
+          document.getElementById("currentVersion").innerText = s.firmware_version.toFixed(2);
+          document.getElementById("currentVersionOta").innerText = s.firmware_version.toFixed(2);
+          const ramUsed = s.ram_total - s.ram_free;
+          document.getElementById("cpuFreq").innerText = s.cpu_freq;
+          document.getElementById("cpuCores").innerText = s.cpu_cores;
+          document.getElementById("ramTotal").innerText = formatBytes(s.ram_total);
+          document.getElementById("ramUsed").innerText = formatBytes(ramUsed);
+          document.getElementById("ramFree").innerText = formatBytes(s.ram_free);
+          updateProgressBar("ramUsageBar", ramUsed, s.ram_total, "#22c55e");
+          document.getElementById("flashTotal").innerText = formatBytes(s.flash_total);
+          document.getElementById("flashUsed").innerText = formatBytes(s.flash_used);
+          document.getElementById("flashFree").innerText = formatBytes(s.flash_free_update);
+          updateProgressBar("flashUsageBar", s.flash_used, s.flash_total, "#fbbf24");
+        }
+
+        // Modbus snapshot (optional render)
+        if (data.modbus && data.modbus.devices) {
+          modbusDevices = data.modbus.devices || [];
+          // Flatten registers for table rendering
+          const flatRegisters = [];
+          modbusDevices.forEach((device) => {
+            const regs = (device.registers || []).map((reg, idx) => ({
+              ...reg,
+              id: `${device.id}-${idx}`,
+              deviceId: device.id,
+              regIndex: idx,
+            }));
+            flatRegisters.push(...regs);
+          });
+          modbusRegisters = flatRegisters;
+          renderModbusDevices();
+          renderModbusRegisters();
+        }
+      } catch (e) {
+        // ignore errors, retry later
+      }
+      // unified refresh cadence
+      setTimeout(fetchAllStatus, 5000);
+    }
+
     /** Network */
+    async function fetchNetworkConfig() {
+      try {
+        const response = await fetch("/config/network");
+        if (!response.ok) return;
+        const data = await response.json();
+        document.getElementById("useStaticIP").checked = !!(data.useStaticIP ?? data.staticIp);
+        document.getElementById("ipAddress").value = data.ipAddress || "";
+        document.getElementById("subnetMask").value = data.subnetMask || "";
+        document.getElementById("gateway").value = data.gateway || "";
+        const mode = data.mode || ((data.useStaticIP ?? false) ? "static" : "dhcp");
+        const current = data.currentIp || "";
+        const statusEl = document.getElementById("currentIPStatus");
+        statusEl.innerText = mode === "static"
+          ? `Static IP: ${data.ipAddress || ""}`
+          : `DHCP IP: ${current}`;
+      } catch (e) {
+        // ignore
+      }
+    }
     async function saveNetworkConfig() {
       const staticIp = document.getElementById("useStaticIP").checked;
       const ipAddress = document.getElementById("ipAddress").value;
@@ -990,6 +1201,21 @@
     }
 
     /** MQTT */
+    async function fetchMqttConfig() {
+      try {
+        const response = await fetch("/config/mqtt");
+        if (!response.ok) return;
+        const data = await response.json();
+        document.getElementById("mqttEnabled").checked = !!data.enabled;
+        document.getElementById("mqttUrl").value = data.url || "";
+        document.getElementById("mqttPort").value = data.port || "";
+        document.getElementById("mqttTopic").value = data.topic || "";
+        document.getElementById("mqttUsername").value = data.username || "";
+        document.getElementById("mqttPassword").value = data.password || "";
+      } catch (e) {
+        // ignore
+      }
+    }
     async function saveMqttConfig() {
       const enabled = document.getElementById("mqttEnabled").checked;
       const url = document.getElementById("mqttUrl").value;
@@ -1011,9 +1237,24 @@
       });
       const result = await response.json();
       alert("MQTT config " + (result.success ? "saved" : "failed"));
+      // Refresh fields after save in case backend applied transformations
+      fetchMqttConfig();
     }
 
     /** API */
+    async function fetchApiConfig() {
+      try {
+        const response = await fetch("/config/api");
+        if (!response.ok) return;
+        const data = await response.json();
+        document.getElementById("apiEnabled").checked = !!data.enabled;
+        document.getElementById("apiUrl").value = data.url || "";
+        document.getElementById("apiUsername").value = data.username || "";
+        document.getElementById("apiPassword").value = data.password || "";
+      } catch (e) {
+        // ignore
+      }
+    }
     async function saveApiConfig() {
       const enabled = document.getElementById("apiEnabled").checked;
       const url = document.getElementById("apiUrl").value;
@@ -1026,6 +1267,8 @@
       });
       const result = await response.json();
       alert("API config " + (result.success ? "saved" : "failed"));
+      // Refresh fields after save
+      fetchApiConfig();
     }
     async function postApiData() {
       const data = document.getElementById("apiData").value;
@@ -1106,7 +1349,18 @@
       if (response.ok) {
         const data = await response.json();
         modbusDevices = data.devices || [];
-        modbusRegisters = data.registers || [];
+        // Flatten device registers to a single array for UI
+        const flatRegisters = [];
+        modbusDevices.forEach((device) => {
+          const regs = (device.registers || []).map((reg, idx) => ({
+            ...reg,
+            id: `${device.id}-${idx}`,
+            deviceId: device.id,
+            regIndex: idx,
+          }));
+          flatRegisters.push(...regs);
+        });
+        modbusRegisters = flatRegisters;
         renderModbusDevices();
         renderModbusRegisters();
       }
@@ -1133,10 +1387,15 @@
               : '<span class="led led-off"></span> Disabled'
             }</td>
         <td>
-          <button onclick="editDevice('${device.id}')">Edit</button>
-          <button onclick="deleteDevice('${device.id}')">Delete</button>
-          <button onclick="showAddRegisterForm('${device.id
-            }')">Add Register</button>
+          <button class="btn-icon primary" title="Edit" onclick="editDevice('${device.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm19.71-11.46a1.004 1.004 0 0 0 0-1.42l-2.34-2.34a1.004 1.004 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"/></svg>
+          </button>
+          <button class="btn-icon danger" title="Delete" onclick="deleteDevice('${device.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </button>
+          <button class="btn-icon success" title="Add Register" onclick="showAddRegisterForm('${device.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          </button>
         </td>
       </tr>`;
         });
@@ -1172,8 +1431,12 @@
               : '<span class="led led-off"></span> Disabled'
             }</td>
         <td>
-          <button onclick="editRegister('${register.id}')">Edit</button>
-          <button onclick="deleteRegister('${register.id}')">Delete</button>
+          <button class="btn-icon primary" title="Edit" onclick="editRegister('${register.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm19.71-11.46a1.004 1.004 0 0 0 0-1.42l-2.34-2.34a1.004 1.004 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"/></svg>
+          </button>
+          <button class="btn-icon danger" title="Delete" onclick="deleteRegister('${register.id}')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </button>
         </td>
       </tr>`;
         });
@@ -1303,6 +1566,7 @@
       editingRegisterId = null;
       document.getElementById("registerId").value = "";
       document.getElementById("registerDeviceId").value = deviceId;
+      document.getElementById("registerIndex").value = "";
       document.getElementById("registerType").value = "holding";
       document.getElementById("registerAddress").value = "";
       document.getElementById("registerName").value = "";
@@ -1317,6 +1581,7 @@
       editingRegisterId = registerId;
       document.getElementById("registerId").value = registerId;
       document.getElementById("registerDeviceId").value = register.deviceId;
+      document.getElementById("registerIndex").value = register.regIndex;
       document.getElementById("registerType").value = register.type;
       document.getElementById("registerAddress").value = register.address;
       document.getElementById("registerName").value = register.name;
@@ -1358,7 +1623,9 @@
       if (editingRegisterId) {
         url = "/modbus-tcp/register/update";
         method = "POST";
-        registerData.id = editingRegisterId;
+        // backend expects deviceId and regIndex for update
+        registerData.deviceId = deviceId;
+        registerData.regIndex = parseInt(document.getElementById("registerIndex").value);
       }
 
       try {
@@ -1393,10 +1660,15 @@
       }
 
       try {
+        const reg = modbusRegisters.find((r) => r.id === registerId);
+        if (!reg) {
+          alert("Register not found");
+          return;
+        }
         const response = await fetch("/modbus-tcp/register/delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: registerId }),
+          body: JSON.stringify({ deviceId: reg.deviceId, regIndex: reg.regIndex }),
         });
 
         if (response.ok) {
