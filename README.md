@@ -3,6 +3,8 @@
 ## Hướng dẫn sử dụng
 
 Demo: https://pttvn.github.io/f-finc-agent
+user: admin
+password: admin
 
 ### Biên dịch và nạp code cho ESP32
 
