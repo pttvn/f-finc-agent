@@ -129,24 +129,20 @@
     .content {
       flex-grow: 1;
       padding: 0;
-      max-width: 1200px;
       width: calc(100% - 240px);
       margin-left: 240px;
       display: flex;
       flex-direction: column;
-      /* Make content the scroll container below the fixed header */
       height: calc(100vh - 80px);
       margin-top: 80px;
       overflow-y: auto;
     }
 
-    /* Logged-out: full width content without sidebar offset */
     body.logged-out .content {
       margin-left: 0;
       width: 100%;
     }
 
-    /* Logged-out: page title aligns normally without sidebar space */
     body.logged-out h1 {
       padding-left: var(--spacing-6);
     }
@@ -258,7 +254,6 @@
       box-shadow: var(--shadow-sm);
     }
 
-    /* Compact icon buttons for table actions */
     .btn-icon {
       background: #f8fafc;
       color: var(--text-dark);

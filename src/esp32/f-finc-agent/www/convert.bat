@@ -18,4 +18,14 @@ echo Content has been copied to clipboard.
 powershell -Command "Get-Content -Path '%OUTPUT_FILE%' | Set-Clipboard"
 echo.
 echo You can paste this content into your webpage.ino file.
-REM pause
+echo.
+echo Publishing webpage.html to docs as index.html...
+set DOCS_DIR=%~dp0..\..\..\..\docs
+if not exist "%DOCS_DIR%" mkdir "%DOCS_DIR%"
+copy /Y "%INPUT_FILE%" "%DOCS_DIR%\index.html" >nul
+if exist "%DOCS_DIR%\index.html" (
+  echo Published: %DOCS_DIR%\index.html
+) else (
+  echo [ERROR] Failed to publish to docs folder.
+)
+pause
